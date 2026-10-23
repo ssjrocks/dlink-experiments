@@ -114,17 +114,32 @@ box.** Progress 2026-10-23:
   probes; boot log shows `mtk-wdt ... timeout=31 sec`). Recovers in ~70 s, config
   intact. **This is the current wall.**
 
-Remaining to get a bearing:
+**Update 2026-10-23 (2nd attempt): confirmed there is NO normal-mode route.**
+The "safer" `HQA_BFProfileDataRead` (0x1554, same `0xED/0x1E` command, tag 7) was
+tried under the best possible normal-mode conditions — implicit TxBF enabled
+(`ITxBfEn = 1`), a real VHT-NSS2 station associated and sending — and it **also
+rebooted the device**. Root cause (see the protocol doc): the readback-completion
+event is only wired in **ATE mode**; in normal operation the host blocks forever
+and the 31 s watchdog resets the SoC. So every `0xED/0x1E` readback (Qd tag 0x16
+*and* profile tag 7) reboots the box in normal mode. This is a hard wall, not a
+parameter-tuning problem.
 
-1. Drive the sounding sequence correctly first
-   (`HQA_ManualAssoc`/`HQA_BFSounding`/`HQA_StaRecBfUpdate`) so a valid Qd profile
-   exists and the Qd command *completes* instead of wedging the watchdog. Each
-   step must be checked for not hanging the command channel.
-2. Per-chain phase-offset **calibration** against known angles.
-3. A **MUSIC** (or similar) estimator over the calibrated phases (3-element array).
+Remaining to get a bearing (the real, from-scratch bench effort):
 
-Steps 2–3 are an empirical bench loop (requires physically moving a transmitter
-through known angles) — the realistic multi-session chunk of remaining work.
+1. Enter **ATE/RF-test mode** (`iwpriv ... set ATE=ATESTART` / `MtATESetMacTxRx`)
+   so the readback event hook is installed. This drops live STAs and needs a
+   cooperating transmitter on the ATE RX channel.
+2. Drive the QA-tool sounding sequence: `HQA_ManualAssoc` → `HQA_StaRecBfUpdate`
+   → `HQA_TxBfProfileTagMatrix` → `HQA_BFSounding`, verifying each step doesn't
+   wedge the command channel, until a valid profile exists.
+3. Read it back (`HQA_BFProfileDataRead`/`HQA_BFQdRead`) — should now complete.
+4. Per-chain phase-offset **calibration** against known angles.
+5. A **MUSIC** (or similar) estimator over the calibrated phases (3-element array).
+
+Steps 4–5 are an empirical bench loop (requires physically moving a transmitter
+through known angles). This is genuinely a multi-session effort and is blocked
+behind closed MCU firmware (the `0xED/0x1E` handler can't be inspected), so it is
+trial-and-error on real hardware with reboots along the way.
 
 ## 6. Raw I/Q / SDR — MAPPED, NOT DRIVEN
 

@@ -127,3 +127,35 @@ exact wire format:
 > sounding sequence (`HQA_ManualAssoc`/`HQA_BFSounding`/`HQA_StaRecBfUpdate`) has
 > to be driven correctly before `BFQdRead`, and each step must be verified not to
 > wedge the command channel. This is the current frontier.
+
+### Follow-up test (2026-10-23): the profile read reboots too — root cause found
+
+`HQA_BFProfileDataRead` (0x1554) uses the **same** firmware command
+`ExtCmd 0xED / subcmd 0x1E`, only with a different tag (**7** instead of 0x16):
+payload `{7, pfmu_id, fgBFer, band, subCarrIdx(2B)}`. It was tried as the
+"safer" read (it has a host-side NULL-bailout `BFQdRead` lacks) under the best
+normal-mode conditions available:
+
+- **implicit TxBF is enabled** (`dmesg`: `read_itxbf: ITxBfEn = 1`), so the chip
+  computes internal per-subcarrier steering;
+- a real VHT-NSS2 station was associated and passing uplink traffic (so iBF had
+  reciprocity data to calibrate from).
+
+Result: **it still rebooted the device** (confirmed via uptime reset), exactly
+like `BFQdRead`. So the reboot is **not** "no profile exists" — it is that the
+**readback-completion event is only wired up in ATE/RF-test mode**. In normal AP
+operation the async event that fills the host buffer (`adapter+0x7a2c98`) is
+never generated (cf. the RE note that the IQ/profile readback chip-op hook at
+`+0x158` is NULL = "not hooked" outside test mode). The host thread then blocks
+forever in `wait_for_completion_timeout` holding a lock, the `/dev/watchdog`
+kicker is starved, and the 31 s MTK watchdog resets the SoC.
+
+**Conclusion:** there is **no normal-mode route** to the per-subcarrier phase /
+Qd / PFMU data on this chip. Any `0xED/0x1E` readback reboots the box. Phase data
+requires the full MediaTek QA-tool flow **in ATE mode** — enter ATE
+(`MtATESetMacTxRx`, which installs the readback event hook), then
+`HQA_ManualAssoc` → `HQA_StaRecBfUpdate` → `HQA_TxBfProfileTagMatrix` →
+`HQA_BFSounding` with a cooperating transmitter on the ATE RX channel, and only
+then read. That is a from-scratch bench effort (test-mode sounding partner +
+calibration), not a normal-operation capture. Amplitude DF via `iwpriv stat`
+remains the only reboot-free per-antenna signal.
