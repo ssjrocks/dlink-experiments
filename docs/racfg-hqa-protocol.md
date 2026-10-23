@@ -9,13 +9,20 @@ RX statistics (4 chains). Reverse-engineered from the on-device `ated` daemon
 
 ## Transport
 
-- **On the device**, start the ATE bridge daemon (not auto-running):
+- **On the device**, start the bridge daemon (not auto-running):
   ```bash
-  iwpriv ra0 set ATE=ATESTART
-  ated -f -u -b br-lan -i ra0      # -u = unicast reply
+  ated -f -u -b br-lan -i rax0     # -u = unicast reply; -i picks the band's iface
   ```
   `ated` opens a `PF_PACKET` raw socket (promiscuous) that receives MediaTek
   **RACFG** command frames and forwards them to the driver via ioctl.
+
+  > **The HQA channel works in NORMAL AP operation — ATE mode is NOT required.**
+  > (2026-10-23) With `ated` running and the radio in ordinary AP mode (no
+  > `iwpriv ... set ATE=ATESTART`), `HQA_GetChipID`, `hqa_get_fw_info` and
+  > `HQA_GetRxStatisticsAll` all return live data, and associated stations stay
+  > connected. This is better than the earlier assumption that you must enter ATE
+  > mode (which also drops every STA). Pick `-i rax0` for 5 GHz, `-i ra0` for
+  > 2.4 GHz, matching the band your target station is on.
 
 - **From the PC** (on the same L2 segment, e.g. over the switch to the device's
   `br-lan`): a raw `AF_PACKET` socket.
@@ -89,3 +96,34 @@ per-antenna RSSI → coarse (amplitude) direction.
 Raw ICap (`MT_ATESetICapStart`) is **not** a direct HQA command (not in the
 table) — the BF Q/D path is the exposed route to phase data via HQA; raw-I/Q
 ICap would need the separate `iwpriv`/ATE RF-test ioctl path.
+
+## `HQA_BFQdRead` (0x155b) decoded — and why it reboots the device
+
+Decompiling the handler chain
+`HQA_BFQdRead` → `Set_TxBfQdRead` → `TxBfQdRead` → `CmdETxBfQdRead` gives the
+exact wire format:
+
+- **Request data field** = a **4-byte big-endian subcarrier index**. The driver
+  byteswaps it, formats it as a decimal string, then `simple_strtol`s it back
+  and **truncates it to a signed `char`** — so the effective range is −128..127.
+- `CmdETxBfQdRead` builds firmware **ExtCmd `0xED`, sub-command `0x1E`** with a
+  4-byte payload `{ 0x16, subCarrIdx, band, 0 }`. `band` is derived from the
+  ioctl interface (so `-i rax0` → 5 GHz band). **No station/wcid is selected** —
+  it reads the Qd matrix the chip currently holds for that band.
+- The result arrives **asynchronously**: an ExtEvent handler stores the buffer,
+  and `HQA_BFQdRead` blocks on `wait_for_completion_timeout` before copying up to
+  **14 DWORDs** into the RACFG reply at `data+2`.
+
+> ⚠️ **HAZARD (observed 2026-10-23): invoking `BFQdRead` crash-reboots the
+> device.** With no valid *sounded* BF profile held by the chip, the firmware
+> command (`chip_cmd_tx`) never completes; the board's **MediaTek hardware
+> watchdog (31 s timeout, `mtk-wdt`)** then resets the whole SoC. A client that
+> retries with long timeouts just keeps the chip wedged into the watchdog window.
+> The device recovers on its own (~70 s, config survives), but this makes naive
+> Qd polling destructive.
+>
+> Getting usable phase data therefore requires first guaranteeing a valid sounded
+> profile exists for the target STA (so the command actually completes) — the BF
+> sounding sequence (`HQA_ManualAssoc`/`HQA_BFSounding`/`HQA_StaRecBfUpdate`) has
+> to be driven correctly before `BFQdRead`, and each step must be verified not to
+> wedge the command channel. This is the current frontier.

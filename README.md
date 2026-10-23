@@ -52,7 +52,7 @@ plus live experiments on the actual device. Findings are labelled **proven**
 | Wi-Fi driver RE verdicts | ✅ Proven (Ghidra + live) |
 | RACFG/HQA userspace client | ✅ Working (live chip ID, fw build, per-antenna RSSI) |
 | Per-antenna RSSI direction finding | ✅ Demonstrated (see [results](results/)) |
-| Phase-based AoA (CSI/MUSIC) | 🚧 Reachable, not built |
+| Phase-based AoA (CSI/MUSIC) | 🚧 `BFQdRead` command decoded; invoking it reboots the box (31 s watchdog) — needs valid sounding first |
 | Raw I/Q ICap / SDR | 🔬 Mapped in firmware, not driven |
 
 See **[STATUS.md](STATUS.md)** for the full report.

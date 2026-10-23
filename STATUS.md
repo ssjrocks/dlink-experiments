@@ -98,18 +98,32 @@ it. Any transmitting station works; the PC's own Wi-Fi radio is a convenient
 controlled test station (associate it to `dlink-9A9D`, ping the router to keep
 uplink traffic flowing) since this PC uses Ethernet for internet.
 
-**Phase-based AoA — reachable, not built.** The substrate exists (BF Q/D matrix
-and/or ICap I/Q), but turning it into a bearing needs:
+**Phase-based AoA — frontier; `BFQdRead` command decoded, but it reboots the
+box.** Progress 2026-10-23:
 
-1. ATE RX locked to a channel with a target transmitting on it.
-2. `HQA_ManualAssoc` → `HQA_BFSounding` → `HQA_BFQdRead` to pull per-subcarrier,
-   per-antenna phase (`BFQdRead` currently times out with no sounding data —
-   needs a sounded STA and likely a subcarrier-index param + async reply
-   handling).
-3. Per-chain phase-offset **calibration** against known angles.
-4. A **MUSIC** (or similar) estimator over the calibrated phases.
+- **The HQA channel works in normal AP mode (no ATE)** — chipid/fwinfo/rxstat
+  all return live data with associated stations staying connected. This removes
+  the earlier assumption that ATE mode (which drops all STAs) was required.
+- **`HQA_BFQdRead` (0x155b) fully decoded** (see the protocol doc): data field =
+  4-byte BE subcarrier index (→ signed char), emits firmware ExtCmd `0xED`/`0x1E`
+  payload `{0x16, subCarrIdx, band, 0}`, band from the ioctl iface, async reply
+  of up to 14 DWORDs. No wcid needed.
+- ⚠️ **Invoking it crash-reboots the device.** With no valid *sounded* profile
+  the firmware command never completes and the **MediaTek 31 s hardware watchdog**
+  resets the SoC (confirmed: device uptime reset to minutes right after the Qd
+  probes; boot log shows `mtk-wdt ... timeout=31 sec`). Recovers in ~70 s, config
+  intact. **This is the current wall.**
 
-Steps 3–4 are an empirical bench loop (requires physically moving a transmitter
+Remaining to get a bearing:
+
+1. Drive the sounding sequence correctly first
+   (`HQA_ManualAssoc`/`HQA_BFSounding`/`HQA_StaRecBfUpdate`) so a valid Qd profile
+   exists and the Qd command *completes* instead of wedging the watchdog. Each
+   step must be checked for not hanging the command channel.
+2. Per-chain phase-offset **calibration** against known angles.
+3. A **MUSIC** (or similar) estimator over the calibrated phases (3-element array).
+
+Steps 2–3 are an empirical bench loop (requires physically moving a transmitter
 through known angles) — the realistic multi-session chunk of remaining work.
 
 ## 6. Raw I/Q / SDR — MAPPED, NOT DRIVEN
