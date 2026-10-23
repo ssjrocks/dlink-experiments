@@ -22,7 +22,7 @@ plus live experiments on the actual device. Findings are labelled **proven**
 |---|---|
 | Model | D-Link DIR-1750, hardware rev **A1** |
 | SoC | MediaTek **MT7629B** (ARM Cortex-A7, armv7) |
-| Wi-Fi | MediaTek **MT7615 / MT7615D**, 4 physical antennas |
+| Wi-Fi | MediaTek **MT7615 / MT7615D**, **3×3:3** (3 RX chains), 4 physical antennas |
 | Stock OS | Rebadged **OpenWrt** (LuCI, opkg, dropbear, uci — hidden behind the D-Link UI) |
 | Wi-Fi driver | Proprietary fullmac **`mt_wifi.ko`** (RaLink lineage: `ra0`/`rax0`/`apcli0`/`wds0`, `iwpriv` not `iw`, **no** mac80211/mt76) |
 
@@ -78,8 +78,9 @@ See **[STATUS.md](STATUS.md)** for the full report.
   fully documented. → [docs/racfg-hqa-protocol.md](docs/racfg-hqa-protocol.md)
 
 - **Amplitude direction finding works today.** Carrying a transmitting phone
-  around the room produces a clear, repeatable swing in the four per-antenna
-  RSSI values (≈24 dB distance swing; strongest-antenna rotates with bearing).
+  around the room produces a clear, repeatable swing in the per-antenna RSSI
+  values (≈24 dB distance swing; strongest-antenna rotates with bearing). The
+  radio is 3×3, so the array is 3 elements (the 4th RSSI is always the floor).
   → [results/df_result.png](results/df_result.png)
 
 - **Firmware is OpenSSL `Salted__` AES-256-CBC** behind a 116-byte D-Link
@@ -118,12 +119,21 @@ client (e.g. a phone) associated and transmitting (streaming video is an easy
 traffic source).
 
 ```bash
-# Live bars, ~1 Hz, reading the station table over SSH:
-python3 tools/df_live.py          # expects an ssh host alias "dir1750"
+# Live bars, ~1 Hz, cleanest source (iwpriv stat, normal operation):
+python3 tools/rssi_live.py rax0   # rax0 = 5GHz, ra0 = 2.4GHz; ssh alias "dir1750"
+
+# Older variant that scrapes the dmesg station table:
+python3 tools/df_live.py
 
 # Or log a timed capture while you move the client around:
 ./tools/cap3.sh run.log 40        # 40 s
 ```
+
+Any transmitting station works as the target. A convenient controlled one is
+the host PC's own Wi-Fi radio (if, like here, the PC uses Ethernet for
+internet): `nmcli con up dlink-9A9D` then `ping -I <wlan> -i 0.01 192.168.1.254`
+to keep uplink traffic flowing. Remember this is a **3×3 radio** — the 4th RSSI
+value is always the noise floor.
 
 The RACFG/HQA client (`tools/hqa.py`) talks to the device directly over raw
 Ethernet and needs `sudo` and the device's `ated` daemon running:

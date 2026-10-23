@@ -76,6 +76,30 @@ signal that the ICap hooks are wired.
 ATE floods dmesg and can hang the SSH session; recover with `reboot` (over the
 wired shell all config survives, ~70 s).
 
+## Radio is 3×3:3 — only 3 RX chains (verified live)
+
+The per-antenna RSSI readout (`iwpriv <iface> stat` → `RSSI = a b c d`) always
+shows the **4th value at `-127`** (noise floor), on both bands and for every
+client tested. This is **not a fault**: the DIR-1750 is an AC1750-class
+**3×3:3** radio with **3 RF/RX chains**. Confirmed two ways:
+
+- Max rates are 3-stream on both bands: 2.4 GHz **450 Mb/s** (= 3×150, HT40) and
+  5 GHz **1300 Mb/s** (= 3×433, VHT80).
+- `iwpriv rax0 stat` → `RSSI = -53 -47 -52 -127` is stable across different
+  associated clients (a phone, and this PC's Wi-Fi).
+
+The board has 4 physical antennas but they feed 3 RF chains. For direction
+finding the usable array is therefore **3 elements** — enough for an unambiguous
+2D bearing.
+
+### Best per-antenna RSSI source: `iwpriv <iface> stat`
+
+`iwpriv rax0 stat` (or `ra0` for 2.4 GHz) prints a `RSSI = a b c d` line that is
+the driver's own per-chain RSSI, available in **normal AP operation** — no ATE
+mode, no `DebugCategory`, no dmesg scraping. This is the cleanest amplitude-DF
+input and is what [../tools/rssi_live.py](../tools/rssi_live.py) reads. Keep a
+station associated and transmitting (uplink traffic) so the values stay fresh.
+
 ## Why full OpenWrt is not practical here
 
 No mt76 Wi-Fi support exists for MT7629, and there's a `scpsys` WBSYS

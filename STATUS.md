@@ -81,10 +81,22 @@ clear, repeatable signal:
 - the live display updates at ~1 Hz.
 
 See [results/df_result.png](results/df_result.png) and the raw samples in
-[results/df_run.log](results/df_run.log). Note ANT3 reads the noise floor
-(`-127`) in these runs — only 3 of 4 chains were reporting usable RSSI for the
-associated client; investigating whether that is a station-table artifact vs an
-RX-chain state is a to-do.
+[results/df_run.log](results/df_run.log).
+
+**ANT3-floor resolved (2026-10-23):** ANT3 always reading `-127` is **not a bug**
+— this is a **3×3:3 (AC1750-class) radio with only 3 RX chains**. Confirmed two
+ways: (a) both bands cap at 3 spatial streams (2.4 GHz 450 Mb/s = 3×150; 5 GHz
+1300 Mb/s = 3×433), and (b) `iwpriv rax0 stat` reports `RSSI = a b c -127`
+consistently across different clients (phone and PC). The 4 physical antennas
+feed 3 RF chains. So the usable array is **3 elements** — still enough for an
+unambiguous 2D bearing.
+
+**Cleaner data source found:** `iwpriv <iface> stat` prints an authoritative
+`RSSI = a b c d` line directly, in **normal operation** (no ATE mode, no
+`DebugCategory`, no dmesg scraping). [tools/rssi_live.py](tools/rssi_live.py) uses
+it. Any transmitting station works; the PC's own Wi-Fi radio is a convenient
+controlled test station (associate it to `dlink-9A9D`, ping the router to keep
+uplink traffic flowing) since this PC uses Ethernet for internet.
 
 **Phase-based AoA — reachable, not built.** The substrate exists (BF Q/D matrix
 and/or ICap I/Q), but turning it into a bearing needs:
@@ -116,13 +128,11 @@ engineering effort from the HQA client above.
   behaviour is **genuinely hard** and may not yield usable bearings without
   careful calibration; this is the part most likely to stall.
 - `BFQdRead` returning phase data at all on this chip/firmware is unproven.
-- The ANT3-always-floor observation needs explaining before trusting 4-chain
-  results.
 
 ## What I'd do next
 
-1. Explain the ANT3 floor reading (station-table field mapping vs RX chain).
+1. ~~Explain the ANT3 floor reading.~~ **Done** — it's a 3×3 radio (3 RX chains).
 2. Get `HQA_BFSounding` + `HQA_BFQdRead` to return real per-subcarrier phase for
-   an associated, sounded station.
+   an associated, sounded station (the one open phase-data question).
 3. Stand up a calibration jig (transmitter at known angles) and a first MUSIC
-   pass on amplitude+phase.
+   pass on amplitude+phase across the 3-element array.
