@@ -114,32 +114,38 @@ box.** Progress 2026-10-23:
   probes; boot log shows `mtk-wdt ... timeout=31 sec`). Recovers in ~70 s, config
   intact. **This is the current wall.**
 
-**Update 2026-10-23 (2nd attempt): confirmed there is NO normal-mode route.**
-The "safer" `HQA_BFProfileDataRead` (0x1554, same `0xED/0x1E` command, tag 7) was
-tried under the best possible normal-mode conditions — implicit TxBF enabled
-(`ITxBfEn = 1`), a real VHT-NSS2 station associated and sending — and it **also
-rebooted the device**. Root cause (see the protocol doc): the readback-completion
-event is only wired in **ATE mode**; in normal operation the host blocks forever
-and the 31 s watchdog resets the SoC. So every `0xED/0x1E` readback (Qd tag 0x16
-*and* profile tag 7) reboots the box in normal mode. This is a hard wall, not a
-parameter-tuning problem.
+**Update 2026-10-23: confirmed NO normal-mode route** — `HQA_BFProfileDataRead`
+(0x1554, tag 7) also reboots in normal mode even with iTxBF on and a live STA,
+because the readback-completion event is only wired in ATE mode.
 
-Remaining to get a bearing (the real, from-scratch bench effort):
+**Update 2026-10-24: BLOCKER SOLVED — readback works in ATE mode, no reboots.**
+Entering ATE mode first (`iwpriv ra0 set ATE=ATESTART`) makes `MT_ATEStart` call
+`MtCmdATEModeCtrl(1)` and set the completion timeout to 3 s, so the `0xED/0x1E`
+readback **returns cleanly** instead of hanging. The exact read that guaranteed a
+reboot now reads **every subcarrier** with the device uptime unaffected (128/128
+captured, stable). The full MediaTek ATE TxBF command surface is mapped
+(init / iBF profile config / iBF instant phase-cal / sounding / profile read) —
+see the protocol doc. Tool: [tools/bf_profile_read.py](tools/bf_profile_read.py).
 
-1. Enter **ATE/RF-test mode** (`iwpriv ... set ATE=ATESTART` / `MtATESetMacTxRx`)
-   so the readback event hook is installed. This drops live STAs and needs a
-   cooperating transmitter on the ATE RX channel.
-2. Drive the QA-tool sounding sequence: `HQA_ManualAssoc` → `HQA_StaRecBfUpdate`
-   → `HQA_TxBfProfileTagMatrix` → `HQA_BFSounding`, verifying each step doesn't
-   wedge the command channel, until a valid profile exists.
-3. Read it back (`HQA_BFProfileDataRead`/`HQA_BFQdRead`) — should now complete.
-4. Per-chain phase-offset **calibration** against known angles.
-5. A **MUSIC** (or similar) estimator over the calibrated phases (3-element array).
+What this does and does not give:
+- ✅ **Reliable, no-reboot readback** of per-subcarrier BF/PFMU data in ATE mode —
+  the hard blocker that caused every reboot is gone.
+- ⚠️ Reading an **unconfigured** PFMU returns stable-but-structureless data (not a
+  channel) — see [results/bf_profile_pfmu0.png](results/bf_profile_pfmu0.png).
+- 🔎 **iBF InstCal** measures the chip's *internal* per-chain phase offsets (the
+  AoA **calibration constant**), not direction.
+- 🎯 **External AoA phase** still needs a **BF sounding of a real transmitter**
+  (`ATETXSOUNDING`) → channel H across the 3 antennas.
 
-Steps 4–5 are an empirical bench loop (requires physically moving a transmitter
-through known angles). This is genuinely a multi-session effort and is blocked
-behind closed MCU firmware (the `0xED/0x1E` handler can't be inspected), so it is
-trial-and-error on real hardware with reboots along the way.
+Remaining to a live bearing (now a standard RF-bench task, not a firmware wall):
+
+1. Sound a cooperating transmitter on the ATE channel (`ATETXSOUNDING` / the
+   manual-assoc + sounding sequence) and read its per-subcarrier channel.
+2. Subtract the iBF per-chain **phase calibration** (`ATEIBfInstCal`).
+3. **MUSIC** (or similar) over the 3-element array → bearing.
+
+Steps 1–3 need a second radio as the test transmitter and a physical calibration
+loop (moving it through known angles) — the part that needs the user in the loop.
 
 ## 6. Raw I/Q / SDR — MAPPED, NOT DRIVEN
 

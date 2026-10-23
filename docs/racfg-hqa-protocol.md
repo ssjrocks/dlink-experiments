@@ -150,12 +150,63 @@ never generated (cf. the RE note that the IQ/profile readback chip-op hook at
 forever in `wait_for_completion_timeout` holding a lock, the `/dev/watchdog`
 kicker is starved, and the 31 s MTK watchdog resets the SoC.
 
-**Conclusion:** there is **no normal-mode route** to the per-subcarrier phase /
-Qd / PFMU data on this chip. Any `0xED/0x1E` readback reboots the box. Phase data
-requires the full MediaTek QA-tool flow **in ATE mode** — enter ATE
-(`MtATESetMacTxRx`, which installs the readback event hook), then
-`HQA_ManualAssoc` → `HQA_StaRecBfUpdate` → `HQA_TxBfProfileTagMatrix` →
-`HQA_BFSounding` with a cooperating transmitter on the ATE RX channel, and only
-then read. That is a from-scratch bench effort (test-mode sounding partner +
-calibration), not a normal-operation capture. Amplitude DF via `iwpriv stat`
-remains the only reboot-free per-antenna signal.
+**Conclusion (normal mode):** there is **no normal-mode route** to the
+per-subcarrier phase / Qd / PFMU data. Any `0xED/0x1E` readback reboots the box
+in normal AP mode. Amplitude DF via `iwpriv stat` is the only reboot-free
+per-antenna signal available in normal operation.
+
+## SOLVED (2026-10-24): the readback works in ATE mode — no reboots
+
+The reboot is fixed by entering **ATE/RF-test mode first**. Reverse-engineering
+`MT_ATEStart` shows why: it calls **`MtCmdATEModeCtrl(1)`** (puts the MCU in test
+mode so it services the `0xED/0x1E` command) and sets the host completion timeout
+`+0x7a3034` to **3 s** (`RTMPMsecsToJiffies(3000)`). In normal mode that timeout
+is 0 and the MCU isn't in test mode, so the read blocks → watchdog. In ATE mode
+the read **returns cleanly**.
+
+Verified working sequence (over the wired shell + one RACFG read):
+
+```bash
+# on the device:
+iwpriv ra0 set ATE=ATESTART          # enter ATE mode — safe, no crash (MT_ATEStart: wdev_idx:0/1)
+ated -f -u -b br-lan -i ra0          # QA bridge
+# on the PC (RACFG):
+#   HQA_BFProfileDataRead (0x1554), data = 4x u32 BE [pfmu_idx, fgBFer, sub_start, sub_end]
+```
+
+Result: the **exact read that guaranteed a reboot in normal mode now returns in
+ATE mode**, per subcarrier, with no reboot across a full 128-subcarrier sweep
+(device uptime unaffected). Reply payload: `[00000000][u16 count][profile bytes][pad]`;
+the profile bytes vary per subcarrier (12 bytes/subcarrier for this 3-chain radio).
+Tool: [../tools/bf_profile_read.py](../tools/bf_profile_read.py).
+
+### What each ATE path yields (RE'd command/verb map)
+
+The full MediaTek ATE TxBF surface is reachable as `iwpriv <iface> set <verb>=...`
+once in ATE mode. Key verbs and what they give:
+
+| iwpriv verb | handler | yields |
+|---|---|---|
+| `ATE=ATESTART` | `MT_ATEStart` | enter test mode (installs readback hook, 3 s timeout) |
+| `ATETxBfInit` | `SetATETxBfDutInitProc` | init TxBF DUT (dummy STA/BSS, antennas) |
+| `ATEIBfProfileConfig` | `SetATEIBfProfileUpdate` | write an iBF PFMU profile from **E2P phase cal** (self-contained) |
+| `ATEIBfInstCal` | `SetATEIBfInstCal`→`CmdITxBfPhaseCal` | measure **internal per-chain phase offsets** (args: ucGroup, L/M/H, fgSX2, LnaGain) |
+| `ATETXSOUNDING` | `SetATETxSoundingProc` | trigger an NDP **sounding** (external channel H → AoA; needs a TX partner) |
+| `ATETxBfProfileRead` | `SetATETxBfProfileRead` | read a PFMU profile back (same 0xED/0x1E tag 7) |
+
+**Architecture (important):**
+- **iBF InstCal** → the chip's *internal* TX/RX chain phase offsets (a self-cal
+  against an internal reference). This is the **calibration constant** needed for
+  AoA, but it is **not** direction-dependent.
+- **External AoA phase** (an incoming signal's phase across the antennas) comes
+  from **BF sounding** of a real transmitter (`ATETXSOUNDING` / `HQA_BFSounding`)
+  → the channel H / Qd matrix. This is the direction-bearing data and still needs
+  a cooperating transmitter on the channel.
+- The **PFMU profile** read is the stored steering matrix; reading an
+  *unconfigured* pfmu returns stable-but-structureless data (see
+  [../results/bf_profile_pfmu0.png](../results/bf_profile_pfmu0.png) — noise,
+  included only to show the readout mechanism, not a channel).
+
+So the hard blocker (reboot on any readback) is **solved**; a live bearing now
+needs only the standard RF bench step: sound a real transmitter, subtract the
+iBF chain-phase calibration, and run MUSIC over the 3-element array.

@@ -52,7 +52,8 @@ plus live experiments on the actual device. Findings are labelled **proven**
 | Wi-Fi driver RE verdicts | ✅ Proven (Ghidra + live) |
 | RACFG/HQA userspace client | ✅ Working (live chip ID, fw build, per-antenna RSSI) |
 | Per-antenna RSSI direction finding | ✅ Demonstrated (see [results](results/)) |
-| Phase-based AoA (CSI/MUSIC) | ⛔ No normal-mode route: every `0xED/0x1E` readback (Qd + PFMU profile) reboots the box; readback event only exists in ATE mode. Needs full ATE QA-tool bench flow |
+| Per-subcarrier BF/CSI readback | ✅ **Works in ATE mode, no reboots** (the reboot blocker is solved); full ATE TxBF command surface mapped |
+| Phase-based AoA (CSI/MUSIC) | 🚧 Readback solved; a live bearing now needs a BF sounding of a real transmitter + iBF phase cal + MUSIC (standard RF bench, needs a 2nd radio) |
 | Raw I/Q ICap / SDR | 🔬 Mapped in firmware, not driven |
 
 See **[STATUS.md](STATUS.md)** for the full report.
