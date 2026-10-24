@@ -137,15 +137,23 @@ What this does and does not give:
 - 🎯 **External AoA phase** still needs a **BF sounding of a real transmitter**
   (`ATETXSOUNDING`) → channel H across the 3 antennas.
 
-Remaining to a live bearing (now a standard RF-bench task, not a firmware wall):
+**Update 2026-10-24: ICap raw-I/Q path fully reverse-engineered + working commands.**
+The stored BF profile turned out to be static (not a live channel), so live
+per-antenna phase needs **ICap** (raw coherent I/Q of a received frame). Found and
+verified that ICap is driven over the **plain HQA channel** (cmd_type 8):
+`0x1509` enter ICap mode, `0x1580` arm/read, `0x1302` bulk memory read — all
+confirmed against the open mt7615 driver source and **executing on the device with
+no reboot**. Correct capture node identified (`FOUR_WAY_ADC = 0x6`, coherent 4-chain).
+Client: [tools/icap.py](tools/icap.py); full protocol: [docs/icap-protocol.md](docs/icap-protocol.md).
 
-1. Sound a cooperating transmitter on the ATE channel (`ATETXSOUNDING` / the
-   manual-assoc + sounding sequence) and read its per-subcarrier channel.
-2. Subtract the iBF per-chain **phase calibration** (`ATEIBfInstCal`).
-3. **MUSIC** (or similar) over the 3-element array → bearing.
+**Remaining gap:** the ADC→sysram capture does not latch samples yet — every
+readback returns zeros; free-run "completes" empty, trigger-mode never fires with
+the swept parameters. This is the RBIST capture trigger/enable, which needs a
+controlled CW transmitter on the channel, or the RBIST-enable CR sequence, or the
+QA tool's exact arm sequence — a deliberate next step, not more blind sweeping.
 
-Steps 1–3 need a second radio as the test transmitter and a physical calibration
-loop (moving it through known angles) — the part that needs the user in the loop.
+Once I/Q latches: per-antenna phase = `atan2(Q,I)` per chain; inter-chain phase
+differences → bearing over the 3-element array (with a per-chain phase cal).
 
 ## 6. Raw I/Q / SDR — MAPPED, NOT DRIVEN
 
