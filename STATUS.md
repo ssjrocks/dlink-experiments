@@ -146,14 +146,21 @@ confirmed against the open mt7615 driver source and **executing on the device wi
 no reboot**. Correct capture node identified (`FOUR_WAY_ADC = 0x6`, coherent 4-chain).
 Client: [tools/icap.py](tools/icap.py); full protocol: [docs/icap-protocol.md](docs/icap-protocol.md).
 
-**Remaining gap:** the ADC→sysram capture does not latch samples yet — every
-readback returns zeros; free-run "completes" empty, trigger-mode never fires with
-the swept parameters. This is the RBIST capture trigger/enable, which needs a
-controlled CW transmitter on the channel, or the RBIST-enable CR sequence, or the
-QA tool's exact arm sequence — a deliberate next step, not more blind sweeping.
+**Resolved 2026-10-24: ICap does not capture on this firmware — a hard limit.**
+The decisive test (capture the chip's own `ATE=TXCARR` continuous carrier) still
+returned all zeros, and Control=2 returns no capture address. Root cause: the
+capture path is gated on the Wi-Fi chip reporting `0x7615`, but this integrated
+**MT7629 Wi-Fi reports `0x7629`** — so the RBIST/WifiSpectrum capture is not
+enabled for this chip variant in the production firmware (commands ack, MCU never
+captures). Not fixable from the host. See [docs/icap-protocol.md](docs/icap-protocol.md).
 
-Once I/Q latches: per-antenna phase = `atan2(Q,I)` per chain; inter-chain phase
-differences → bearing over the 3-element array (with a per-chain phase cal).
+**Bottom line on phase AoA:** all *live* per-antenna phase paths are blocked on
+stock firmware (ICap gated out; BF profile static; no CSI export). Phase-based AoA
+would need different hardware (discrete MT7615/MT7915 + QA firmware) or a QA/factory
+firmware for this chip. **Live direction finding on this device is limited to
+amplitude** (per-antenna RSSI, 3 chains) — which does show real directional response
+(see [results/df_result.png](results/df_result.png)); a calibrated amplitude bearing
+estimator is the achievable DF path here.
 
 ## 6. Raw I/Q / SDR — MAPPED, NOT DRIVEN
 

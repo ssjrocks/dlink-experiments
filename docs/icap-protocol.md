@@ -79,9 +79,34 @@ written directly (`CR_RBIST_CAPTURE`, sysram interface-select CRs exist in
 `rtmp.h`); or the capture is intended to fire during a controlled TX (DPD-cal use
 case) and needs a cooperating/CW transmitter on the channel to trigger.
 
-**Next steps (deliberate, not blind sweeping):** (1) drive a controlled CW/known
-signal on the capture channel and retry trigger-mode; (2) RE the RBIST
-capture-enable CR sequence and set it via `0x1302`-style writes before arming;
-(3) obtain the QA tool's exact WifiSpectrum arm sequence. Once samples latch,
-per-antenna phase = `atan2(Q, I)` per chain, and inter-chain phase differences →
-bearing (3-element array).
+## CONCLUSION (2026-10-24): ICap does not capture on this device's firmware
+
+The decisive test: made the chip transmit a **continuous carrier (`ATE=TXCARR`)**
+— the strongest possible signal, fed straight into its own ADCs — and captured.
+Result: **still all zeros**, on every node, and Control=2 returns **no capture
+address**. So it is not a signal/trigger problem.
+
+Root cause (from the `0x1580` handler, 0x21eba4): the capture-result path is
+**gated on the Wi-Fi chip reporting `0x7615`**
+(`if ((adapter+0x11ca28 & 0xffff) == 0x7615)`), but the DIR-1750's integrated
+**MT7629 Wi-Fi reports chip-id `0x7629`** (confirmed via HQA `0x1514`). The ICap /
+WifiSpectrum (RBIST) capture is a factory/QA feature that is effectively **not
+enabled for this chip variant in the production firmware**: the host-side handlers
+all exist (commands ack, `MtCmdRfTestICapStart: Status=0`), but the MCU never
+performs the capture and never returns buffer addresses.
+
+**This is a firmware/chip-variant limit, not fixable from the host.** Getting raw
+I/Q would require different hardware (a discrete MT7615/MT7915 with QA firmware) or
+replacing this chip's Wi-Fi firmware with a QA/factory build that enables ICap for
+the `0x7629` variant — a separate, major undertaking.
+
+### Implication for phase-based AoA on this device
+All *live* per-antenna **phase** paths are blocked on stock firmware:
+- **ICap raw I/Q** — gated out for this chip variant (above).
+- **BF/PFMU profile** — reads fine but is a *static* stored profile, not a live channel.
+- **CSI/radiotap** — not exported; the RX path hard-converts 802.11→Ethernet.
+
+So live direction finding on this device is limited to **amplitude** (per-antenna
+RSSI, 3 chains), which does show a real directional response (see
+[df_result.png](../results/df_result.png)). A calibrated amplitude bearing
+estimator is the achievable DF here; phase AoA needs different hardware or firmware.
